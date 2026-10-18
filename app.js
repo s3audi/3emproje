@@ -304,6 +304,46 @@
   let editableImages = [];
   let originalImages = {};
 
+  function normalizePageKey(key) {
+    if (!key) return 'index.html';
+    let s = String(key);
+    try {
+      s = decodeURIComponent(s);
+    } catch (_) {}
+    s = s.toLowerCase().trim();
+    if (s.endsWith('.html') || s.endsWith('.htm')) {
+      s = s.replace(/\.html?$/i, '');
+    }
+    if (s === 'anasayfa' || s === 'index' || s === '') {
+      return 'index';
+    }
+    // Normalize Turkish characters for robust matching (e.g. İ/i, ı/i)
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function getPageEdits(allEdits, pageKey) {
+    if (!allEdits || typeof allEdits !== 'object') return {};
+    if (allEdits[pageKey]) return allEdits[pageKey];
+
+    const targetNorm = normalizePageKey(pageKey);
+    for (const k of Object.keys(allEdits)) {
+      if (normalizePageKey(k) === targetNorm) {
+        return allEdits[k];
+      }
+    }
+    return {};
+  }
+
+  function getPageKeyForStorage(allEdits, pageKey) {
+    const targetNorm = normalizePageKey(pageKey);
+    for (const k of Object.keys(allEdits)) {
+      if (normalizePageKey(k) === targetNorm) {
+        return k;
+      }
+    }
+    return pageKey;
+  }
+
   function loadAllEdits() {
     let local = {};
     try {
@@ -312,7 +352,23 @@
       local = {};
     }
     const remote = (window._SITE_DATA_ && typeof window._SITE_DATA_ === 'object') ? window._SITE_DATA_ : {};
-    return Object.assign({}, remote, local);
+
+    // Deep merge page-by-page so local never wipes out remote page keys
+    const merged = {};
+    const allKeys = new Set([...Object.keys(remote), ...Object.keys(local)]);
+    allKeys.forEach((k) => {
+      if (
+        remote[k] && typeof remote[k] === 'object' && !Array.isArray(remote[k]) &&
+        local[k] && typeof local[k] === 'object' && !Array.isArray(local[k])
+      ) {
+        merged[k] = Object.assign({}, remote[k], local[k]);
+      } else if (local[k] !== undefined) {
+        merged[k] = local[k];
+      } else {
+        merged[k] = remote[k];
+      }
+    });
+    return merged;
   }
 
   function saveAllEdits(data) {
@@ -329,7 +385,7 @@
       if (res.ok) {
         const json = await res.json();
         if (json && typeof json === 'object') {
-          window._SITE_DATA_ = json;
+          window._SITE_DATA_ = Object.assign({}, window._SITE_DATA_ || {}, json);
           indexEditableElements();
           if (typeof renderDrawer === 'function') renderDrawer();
         }
@@ -363,8 +419,9 @@
     const slides = Array.from(gallery.querySelectorAll('.hero-slides .hero-slide img')).map((img) => img.getAttribute('src'));
     const canonicalPage = getCanonicalPageKey();
     const allEdits = loadAllEdits();
-    if (!allEdits[canonicalPage]) allEdits[canonicalPage] = {};
-    allEdits[canonicalPage]._heroOrder = slides;
+    const storageKey = getPageKeyForStorage(allEdits, canonicalPage);
+    if (!allEdits[storageKey]) allEdits[storageKey] = {};
+    allEdits[storageKey]._heroOrder = slides;
     saveAllEdits(allEdits);
   }
 
@@ -381,7 +438,7 @@
 
     const canonicalPage = getCanonicalPageKey();
     const allEdits = loadAllEdits();
-    const pageEdits = allEdits[canonicalPage] || {};
+    const pageEdits = getPageEdits(allEdits, canonicalPage);
     const savedOrder = pageEdits._heroOrder;
     if (!savedOrder || !Array.isArray(savedOrder) || savedOrder.length === 0) return;
 
@@ -417,7 +474,7 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
     ensureFooterLinks();
     const canonicalPage = getCanonicalPageKey();
     const allEdits = loadAllEdits();
-    const pageEdits = allEdits[canonicalPage] || {};
+    const pageEdits = getPageEdits(allEdits, canonicalPage);
 
     const activeContactEmail = getContactTargetEmail();
     const contactFormEl = document.querySelector('#contact-form');
@@ -493,8 +550,9 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
   function updateElementText(id, newHtml, fromInline) {
     const canonicalPage = getCanonicalPageKey();
     const allEdits = loadAllEdits();
-    if (!allEdits[canonicalPage]) allEdits[canonicalPage] = {};
-    allEdits[canonicalPage][id] = newHtml;
+    const storageKey = getPageKeyForStorage(allEdits, canonicalPage);
+    if (!allEdits[storageKey]) allEdits[storageKey] = {};
+    allEdits[storageKey][id] = newHtml;
     saveAllEdits(allEdits);
 
     const targetEl = document.querySelector(`[data-cms-id="${id}"]`);
@@ -512,8 +570,9 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
   function updateElementImage(id, newSrc) {
     const canonicalPage = getCanonicalPageKey();
     const allEdits = loadAllEdits();
-    if (!allEdits[canonicalPage]) allEdits[canonicalPage] = {};
-    allEdits[canonicalPage][id] = newSrc;
+    const storageKey = getPageKeyForStorage(allEdits, canonicalPage);
+    if (!allEdits[storageKey]) allEdits[storageKey] = {};
+    allEdits[storageKey][id] = newSrc;
     saveAllEdits(allEdits);
 
     const item = editableImages.find((img) => img.id === id);
@@ -724,7 +783,11 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
       if (!confirm('Bu sayfadaki TÜM yazı ve resim değişikliklerini varsayılana sıfırlamak istediğinize emin misiniz?')) return;
       const canonicalPage = getCanonicalPageKey();
       const allEdits = loadAllEdits();
-      delete allEdits[canonicalPage];
+      const storageKey = getPageKeyForStorage(allEdits, canonicalPage);
+      delete allEdits[storageKey];
+      if (window._SITE_DATA_ && window._SITE_DATA_[storageKey]) {
+        delete window._SITE_DATA_[storageKey];
+      }
       saveAllEdits(allEdits);
 
       // Reset texts
@@ -770,13 +833,14 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
     document.getElementById('cms-export-json-btn').addEventListener('click', () => {
       const allEdits = loadAllEdits();
       const canonicalPage = getCanonicalPageKey();
-      if (!allEdits[canonicalPage]) allEdits[canonicalPage] = {};
+      const storageKey = getPageKeyForStorage(allEdits, canonicalPage);
+      if (!allEdits[storageKey]) allEdits[storageKey] = {};
 
       // Include current slider order
       const gallery = document.querySelector('#hero-gallery');
       if (gallery) {
         const slides = Array.from(gallery.querySelectorAll('.hero-slides .hero-slide img')).map((img) => img.getAttribute('src'));
-        allEdits[canonicalPage]._heroOrder = slides;
+        allEdits[storageKey]._heroOrder = slides;
       }
 
       allEdits._meta = {
