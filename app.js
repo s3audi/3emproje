@@ -236,10 +236,30 @@
     }
   }
 
+  // Handle URL callback after return
+  try {
+    if (window.location.search.includes('durum=tamam')) {
+      setTimeout(() => {
+        showToast('✅ Mesajınız başarıyla iletildi! En kısa sürede sizinle iletişime geçeceğiz.');
+      }, 400);
+      try {
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      } catch (_) {}
+    }
+  } catch (_) {}
+
   const contactForm = document.querySelector('#contact-form');
   if (contactForm) {
+    // Configure next redirect URL dynamically
+    const nextInput = contactForm.querySelector('#contact-next-url');
+    if (nextInput) {
+      try {
+        nextInput.value = window.location.origin + window.location.pathname + '?durum=tamam';
+      } catch (_) {}
+    }
+
     contactForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
       const submitBtn = contactForm.querySelector('#contact-submit-btn') || contactForm.querySelector('button[type="submit"]');
       const originalBtnText = submitBtn ? submitBtn.textContent : 'Gönder';
 
@@ -250,34 +270,67 @@
 
       const targetEmail = getContactTargetEmail();
 
+      // Collect values
+      const nameVal = (contactForm.querySelector('[name="name"]')?.value || '').trim();
+      const emailVal = (contactForm.querySelector('[name="email"]')?.value || '').trim();
+      const messageVal = (contactForm.querySelector('[name="message"]')?.value || '').trim();
+
+      const payload = {
+        name: nameVal,
+        email: emailVal,
+        message: messageVal,
+        _subject: 'Yeni İletişim Mesajı — 3EM Proje (' + nameVal + ')',
+        _captcha: 'false',
+        _template: 'table'
+      };
+
+      let success = false;
+      let needFallback = false;
+
       try {
-        const formData = new FormData(contactForm);
+        e.preventDefault();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+
         const response = await fetch('https://formsubmit.co/ajax/' + encodeURIComponent(targetEmail), {
           method: 'POST',
           headers: {
+            'Content-Type': 'application/json',
             'Accept': 'application/json'
           },
-          body: formData
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
+        clearTimeout(timer);
 
-        if (response.ok) {
+        const data = await response.json().catch(() => null);
+
+        if (response.ok && data && (data.success === 'true' || data.success === true)) {
+          success = true;
           showToast('✅ Mesajınız başarıyla iletildi! (' + targetEmail + ')');
           contactForm.reset();
+        } else if (data && data.message && data.message.includes('Activation')) {
+          showToast('⚠️ İlk kullanım için aktivasyon linki ' + targetEmail + ' adresine yollandı.');
+          needFallback = true;
         } else {
-          showToast('Mesajınız gönderildi. En kısa sürede iletişime geçeceğiz.');
-          contactForm.reset();
+          needFallback = true;
         }
       } catch (err) {
-        // Fallback: normal form submit if fetch fails (e.g. offline)
-        try {
-          contactForm.submit();
-        } catch (_) {
-          showToast('Mesajınız alındı!');
-        }
+        needFallback = true;
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = originalBtnText;
+        }
+      }
+
+      if (needFallback && !success) {
+        // Direct browser submit fallback so form never hangs
+        try {
+          contactForm.action = 'https://formsubmit.co/' + encodeURIComponent(targetEmail);
+          contactForm.submit();
+        } catch (_) {
+          showToast('Mesajınız işleniyor...');
         }
       }
     });
