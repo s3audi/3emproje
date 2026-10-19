@@ -210,19 +210,22 @@
      6. CONTACT FORM HANDLER (FormSubmit.co API Integration)
      ------------------------------------------------------------------------ */
   const DEFAULT_CONTACT_EMAIL = 'semtasoft@gmail.com';
+  const FORMSUBMIT_TOKEN = '3c820c4f6fed17b23dfcf544ec986046';
 
   function getContactTargetEmail() {
     const allEdits = loadAllEdits();
     if (allEdits.contactEmail && typeof allEdits.contactEmail === 'string') {
       return allEdits.contactEmail.trim();
     }
-    const form = document.querySelector('#contact-form');
-    if (form) {
-      const act = form.getAttribute('action') || '';
-      const match = act.match(/formsubmit\.co\/([^\s\/?#]+)/i);
-      if (match && match[1]) return match[1];
-    }
     return DEFAULT_CONTACT_EMAIL;
+  }
+
+  function getContactEndpoint() {
+    const targetEmail = getContactTargetEmail();
+    if (!targetEmail || targetEmail === 'semtasoft@gmail.com' || targetEmail === DEFAULT_CONTACT_EMAIL) {
+      return FORMSUBMIT_TOKEN;
+    }
+    return targetEmail;
   }
 
   function setContactTargetEmail(email) {
@@ -232,7 +235,8 @@
 
     const form = document.querySelector('#contact-form');
     if (form) {
-      form.setAttribute('action', 'https://formsubmit.co/' + email);
+      const endpoint = getContactEndpoint();
+      form.setAttribute('action', 'https://formsubmit.co/' + endpoint);
     }
   }
 
@@ -259,79 +263,14 @@
       } catch (_) {}
     }
 
-    contactForm.addEventListener('submit', async (e) => {
-      const submitBtn = contactForm.querySelector('#contact-submit-btn') || contactForm.querySelector('button[type="submit"]');
-      const originalBtnText = submitBtn ? submitBtn.textContent : 'Gönder';
+    const endpoint = getContactEndpoint();
+    contactForm.setAttribute('action', 'https://formsubmit.co/' + endpoint);
 
+    contactForm.addEventListener('submit', () => {
+      const submitBtn = contactForm.querySelector('#contact-submit-btn') || contactForm.querySelector('button[type="submit"]');
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.textContent = 'Gönderiliyor...';
-      }
-
-      const targetEmail = getContactTargetEmail();
-
-      // Collect values
-      const nameVal = (contactForm.querySelector('[name="name"]')?.value || '').trim();
-      const emailVal = (contactForm.querySelector('[name="email"]')?.value || '').trim();
-      const messageVal = (contactForm.querySelector('[name="message"]')?.value || '').trim();
-
-      const payload = {
-        name: nameVal,
-        email: emailVal,
-        message: messageVal,
-        _subject: 'Yeni İletişim Mesajı — 3EM Proje (' + nameVal + ')',
-        _captcha: 'false',
-        _template: 'table'
-      };
-
-      let success = false;
-      let needFallback = false;
-
-      try {
-        e.preventDefault();
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
-
-        const response = await fetch('https://formsubmit.co/ajax/' + encodeURIComponent(targetEmail), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(timer);
-
-        const data = await response.json().catch(() => null);
-
-        if (response.ok && data && (data.success === 'true' || data.success === true)) {
-          success = true;
-          showToast('✅ Mesajınız başarıyla iletildi! (' + targetEmail + ')');
-          contactForm.reset();
-        } else if (data && data.message && data.message.includes('Activation')) {
-          showToast('⚠️ İlk kullanım için aktivasyon linki ' + targetEmail + ' adresine yollandı.');
-          needFallback = true;
-        } else {
-          needFallback = true;
-        }
-      } catch (err) {
-        needFallback = true;
-      } finally {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = originalBtnText;
-        }
-      }
-
-      if (needFallback && !success) {
-        // Direct browser submit fallback so form never hangs
-        try {
-          contactForm.action = 'https://formsubmit.co/' + encodeURIComponent(targetEmail);
-          contactForm.submit();
-        } catch (_) {
-          showToast('Mesajınız işleniyor...');
-        }
       }
     });
   }
@@ -529,10 +468,10 @@ Telefon: <a href="tel:+902129510647">+ 90 212 951 06 47</a> - <a href="tel:+9021
     const allEdits = loadAllEdits();
     const pageEdits = getPageEdits(allEdits, canonicalPage);
 
-    const activeContactEmail = getContactTargetEmail();
+    const endpoint = getContactEndpoint();
     const contactFormEl = document.querySelector('#contact-form');
     if (contactFormEl) {
-      contactFormEl.setAttribute('action', 'https://formsubmit.co/' + activeContactEmail);
+      contactFormEl.setAttribute('action', 'https://formsubmit.co/' + endpoint);
     }
 
     // 1. Text elements
